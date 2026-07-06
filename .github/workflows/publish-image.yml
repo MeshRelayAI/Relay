@@ -17,15 +17,16 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/relay
-
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
+
+      - name: Compute lowercase image name
+        id: img
+        run: echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/relay" >> "$GITHUB_OUTPUT"
 
       - name: Resolve release tag
         id: rel
@@ -71,8 +72,8 @@ jobs:
           file: ./_ctx/Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ steps.rel.outputs.version }}
+            ${{ steps.img.outputs.image }}:latest
+            ${{ steps.img.outputs.image }}:${{ steps.rel.outputs.version }}
           labels: |
             org.opencontainers.image.title=Mesh Relay
             org.opencontainers.image.description=Self-hosted Mesh relay. Routes end-to-end-encrypted messages; never sees their contents.
