@@ -1,0 +1,80 @@
+name: Publish relay image to GHCR
+
+# Builds the Mesh relay container image from the published self-hosting release asset
+# (binaries only, no source) and pushes it to the GitHub Container Registry. Runs when a
+# release is published, or on demand.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build from (e.g. v1.0.0). Defaults to the latest release."
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/relay
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [ -n "${{ github.event.release.tag_name }}" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG=$(gh release view --repo "${{ github.repository }}" --json tagName --jq .tagName)
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # Derive a clean semver-ish image tag (strip a leading v).
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download the self-hosting release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ steps.rel.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "Mesh-Relay-selfhost*.zip" \
+            --dir ./_asset
+          unzip -q ./_asset/Mesh-Relay-selfhost*.zip -d ./_ctx
+          ls -R ./_ctx | head -40
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./_ctx
+          file: ./_ctx/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.rel.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=Mesh Relay
+            org.opencontainers.image.description=Self-hosted Mesh relay. Routes end-to-end-encrypted messages; never sees their contents.
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.rel.outputs.version }}
