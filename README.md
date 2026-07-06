@@ -65,4 +65,4 @@ which is the right setup for a private relay. Full reference in `SELF-HOSTING.md
 
 Free for personal and non-commercial use under the
 [PolyForm Noncommercial License 1.0.0](LICENSE). Commercial use requires a
-license: `ifainberg@outlook.com`.
+license: open an issue on this repo to arrange one.
