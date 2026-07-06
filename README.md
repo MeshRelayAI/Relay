@@ -11,17 +11,27 @@ metadata (who talks to whom) with you.
 
 ## Run it
 
+## Run it
+
+### Fastest: one command (prebuilt image)
+
+```bash
+docker run -p 8080:8080 ghcr.io/meshrelayai/relay
+```
+
+That's a full relay on `http://localhost:8080`. No download, no build. Point a
+Mesh client at `http://your-host:8080` (or put it behind an HTTPS reverse proxy).
+
+### Or from the release
+
 Grab the [latest release](../../releases/latest) (`Mesh-Relay-selfhost-*.zip`),
 unzip, then pick one:
 
-### Docker (recommended)
+#### Docker Compose
 
 ```bash
 docker compose up mesh-relay
 ```
-
-Starts a relay on `http://localhost:8080` with in-memory storage. Point a Mesh
-client at `http://your-host:8080` (or put it behind an HTTPS reverse proxy).
 
 Durable + multi-replica (adds Redis):
 
@@ -29,7 +39,7 @@ Durable + multi-replica (adds Redis):
 docker compose --profile redis up
 ```
 
-### Self-contained binary (no Docker, no .NET)
+#### Self-contained binary (no Docker, no .NET)
 
 ```bash
 bin/linux-x64/run.sh          # Linux   (or: PORT=9000 bin/linux-x64/run.sh)
