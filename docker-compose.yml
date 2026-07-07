@@ -6,8 +6,7 @@
 #   Durable + scalable (adds Redis for presence, quota and cross-node routing):
 #     docker compose --profile redis up
 #
-# The image is built from the prebuilt self-contained binary in bin/linux-x64
-# (no source or .NET SDK required). Then point your Mesh client at
+# The image is built from source (see Dockerfile). Then point your Mesh client at
 # http://your-host:8080 (or put it behind a TLS reverse proxy and use https).
 # See SELF-HOSTING.md for the full reference.
 

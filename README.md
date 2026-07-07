@@ -9,7 +9,11 @@ metadata (who talks to whom) with you.
 > [MeshRelayAI/Mesh](https://github.com/MeshRelayAI/Mesh). This repo is only for
 > people who want to host the server themselves.
 
-## Run it
+This repository contains the **full relay source**, published under AGPL-3.0, so
+you can read exactly what the server does before you trust it with your traffic.
+The end-to-end encryption itself lives in the separately published, permissively
+licensed [Mesh.Shared](https://github.com/MeshRelayAI/Shared) library (vendored
+here under `src/Mesh.Shared`).
 
 ## Run it
 
@@ -22,28 +26,33 @@ docker run -p 8080:8080 ghcr.io/meshrelayai/relay
 That's a full relay on `http://localhost:8080`. No download, no build. Point a
 Mesh client at `http://your-host:8080` (or put it behind an HTTPS reverse proxy).
 
-### Or from the release
+### Build the image from source
 
-Grab the [latest release](../../releases/latest) (`Mesh-Relay-selfhost-*.zip`),
-unzip, then pick one:
+```bash
+git clone https://github.com/MeshRelayAI/Relay.git
+cd Relay
+docker build -t mesh-relay .
+docker run -p 8080:8080 mesh-relay
+```
 
-#### Docker Compose
+Or with Docker Compose:
 
 ```bash
 docker compose up mesh-relay
 ```
 
-Durable + multi-replica (adds Redis):
+Durable + multi-replica (adds Redis for presence, quota and cross-node routing):
 
 ```bash
 docker compose --profile redis up
 ```
 
-#### Self-contained binary (no Docker, no .NET)
+### Run it directly with the .NET SDK (no Docker)
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```bash
-bin/linux-x64/run.sh          # Linux   (or: PORT=9000 bin/linux-x64/run.sh)
-bin\win-x64\run.cmd           # Windows (or: set PORT=9000 & run.cmd)
+dotnet run --project src/Mesh.Relay
 ```
 
 ## Configuration (all optional)
@@ -58,6 +67,8 @@ which is the right setup for a private relay. Full reference in `SELF-HOSTING.md
 | `MODEL_ENDPOINT` / `MODEL_API_KEY` / `MODEL_NAME` | Optional hosted free model (OpenAI-compatible) | none |
 | `MODEL_DAILY_TOKEN_LIMIT` | Per-handle daily token budget | `100000` |
 | `MESH_MSG_RATE_PER_MIN` / `MESH_MSG_BURST` | Per-handle rate limit | `120` / `30` |
+| `CONNECTOR_{KEY}_CLIENT_ID` | Override a knowledge-connector OAuth client id (e.g. `CONNECTOR_DROPBOX_CLIENT_ID`) | built-in |
+| `CONNECTOR_{KEY}_SECRET` | The matching OAuth client secret (confidential providers only) | none |
 
 ## Health and metrics
 
@@ -73,6 +84,10 @@ which is the right setup for a private relay. Full reference in `SELF-HOSTING.md
 
 ## License
 
-Free for personal and non-commercial use under the
-[PolyForm Noncommercial License 1.0.0](LICENSE). Commercial use requires a
-license: open an issue on this repo to arrange one.
+The relay is licensed under the
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). If you run a modified
+version of this relay as a network service, the AGPL requires you to offer that
+modified source to its users.
+
+The vendored `src/Mesh.Shared` protocol and encryption library is licensed
+separately under the [Apache License 2.0](src/Mesh.Shared/LICENSE).

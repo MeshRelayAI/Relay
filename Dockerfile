@@ -1,7 +1,4 @@
-# Runtime-only image for the Mesh relay.
-#
-# This uses the prebuilt, self-contained Linux binary shipped in bin/linux-x64,
-# so no .NET SDK and no source are required to build or run it.
+# Build the Mesh relay from source, then run it on a small runtime image.
 #
 #   docker build -t mesh-relay .
 #   docker run -p 8080:8080 mesh-relay
@@ -11,10 +8,14 @@
 # cross-node routing durable/multi-replica, and MODEL_* to offer a hosted free
 # model. See SELF-HOSTING.md.
 
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY src/ ./src/
+RUN dotnet publish src/Mesh.Relay/Mesh.Relay.csproj -c Release -o /app
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
-COPY bin/linux-x64/ ./
-RUN chmod +x ./Mesh.Relay
+COPY --from=build /app ./
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
-ENTRYPOINT ["./Mesh.Relay"]
+ENTRYPOINT ["dotnet", "Mesh.Relay.dll"]
