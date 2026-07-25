@@ -1,7 +1,8 @@
 name: Publish relay image to GHCR
 
 # Builds the Mesh relay container image from source (Dockerfile in this repo) and pushes
-# it to the GitHub Container Registry. Runs when a release is published, or on demand.
+# it to the GitHub Container Registry. Runs when a release is published, when source
+# changes on main, or on demand with an optional version tag.
 
 on:
   release:
@@ -13,6 +14,11 @@ on:
       - "Dockerfile"
       - ".github/workflows/publish-image.yml"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional version to publish alongside latest (for example 1.11.1)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -31,10 +37,21 @@ jobs:
 
       - name: Compute tags
         id: tags
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"
+          VERSION="$RELEASE_TAG"
+          if [ -z "$VERSION" ]; then
+            VERSION="$REQUESTED_VERSION"
+          fi
+          VERSION="${VERSION#v}"
+
+          if [ -n "$VERSION" ]; then
+            if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Invalid version '$VERSION'; expected X.Y.Z." >&2
+              exit 1
+            fi
             echo "list=${{ steps.img.outputs.image }}:latest,${{ steps.img.outputs.image }}:${VERSION}" >> "$GITHUB_OUTPUT"
           else
             echo "list=${{ steps.img.outputs.image }}:latest" >> "$GITHUB_OUTPUT"
