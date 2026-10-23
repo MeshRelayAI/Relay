@@ -1,3 +1,5 @@
+using Mesh.Relay.Push;
+
 namespace Mesh.Relay.Backplane;
 
 /// <summary>The certainty of one directed cross-instance delivery attempt.</summary>
@@ -9,7 +11,8 @@ public enum BackplaneDeliveryOutcome
 }
 
 /// <summary>Outcome of one directed cross-instance forward.</summary>
-public readonly record struct BackplaneDeliveryReceipt(BackplaneDeliveryOutcome Outcome)
+public readonly record struct BackplaneDeliveryReceipt(
+    BackplaneDeliveryOutcome Outcome, string? PreviewReply = null)
 {
     public static BackplaneDeliveryReceipt NotDelivered =>
         new(BackplaneDeliveryOutcome.NotDelivered);
@@ -59,6 +62,11 @@ public interface IBackplane
 
     /// <summary>Returns the instance id currently holding one device's socket, or null if offline.</summary>
     Task<string?> GetInstanceForDeviceAsync(string handle, string deviceId, CancellationToken ct = default);
+
+    Task RememberNotificationWakeAsync(NotificationWakeRoute route, CancellationToken ct = default);
+
+    Task<NotificationWakeRoute?> FindNotificationWakeAsync(
+        string handle, string deviceId, string wakeId, CancellationToken ct = default);
 
     /// <summary>
     /// Publishes an in-flight opaque frame to the instance that owns the handle so it can deliver it

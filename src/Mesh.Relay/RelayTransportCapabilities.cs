@@ -19,7 +19,8 @@ public sealed record RelayTransportCapabilities(
     bool AgentHost,
     bool ContentlessPush,
     int MaxTransportBytes,
-    int MaxFanoutRecipients)
+    int MaxFanoutRecipients,
+    bool OnlineNotificationPreviews = true)
 {
     public static RelayTransportCapabilities Protocol9(bool metadataStore)
         => new(

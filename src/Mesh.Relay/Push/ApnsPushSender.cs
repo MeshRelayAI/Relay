@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -87,8 +88,11 @@ public sealed class ApnsPushSender : IPushSender, IDisposable
         var visible = mode == PushWakeMode.AlertAndSync;
         req.Headers.TryAddWithoutValidation("apns-push-type", visible ? "alert" : "background");
         req.Headers.TryAddWithoutValidation("apns-priority", visible ? "10" : "5");
-        req.Headers.TryAddWithoutValidation("apns-collapse-id", "mesh-sync");
-        req.Headers.TryAddWithoutValidation("apns-expiration", "0");
+        req.Headers.TryAddWithoutValidation("apns-collapse-id", PushWakeDeliveryPolicy.ApnsCollapseKey(mode, wakeId));
+        req.Headers.TryAddWithoutValidation("apns-expiration", DateTimeOffset.UtcNow
+            .AddSeconds(PushWakeDeliveryPolicy.TimeToLiveSeconds)
+            .ToUnixTimeSeconds()
+            .ToString(CultureInfo.InvariantCulture));
 
         using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
         if (resp.IsSuccessStatusCode) return PushSendResult.Sent();
@@ -114,6 +118,7 @@ public sealed class ApnsPushSender : IPushSender, IDisposable
                 ["body"] = "New activity"
             };
             aps["sound"] = "default";
+            aps["mutable-content"] = 1;
         }
         var payload = new Dictionary<string, object?>
         {

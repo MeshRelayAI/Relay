@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Mesh.Relay.Backplane;
+using Mesh.Relay.Push;
 #if MESH_TEST_RELAY_FAULTS
 using Mesh.Relay.LiveFaults;
 #endif
@@ -25,13 +26,17 @@ public sealed class MeshRouter(
     RelayMetrics metrics
 #if MESH_TEST_RELAY_FAULTS
     ,
-    LiveFaultStore liveFaults)
+    LiveFaultStore liveFaults,
 #else
-    )
+    ,
 #endif
+    TimeProvider? timeProvider = null)
 {
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private sealed record ControlBackplanePayload(MeshEnvelope ControlEnvelope);
+    private sealed record PreviewBackplanePayload(
+        NotificationWakeRoute PreviewRoute, NotificationPreviewRequest PreviewRequest);
 
     public string InstanceId => backplane.InstanceId;
 
@@ -145,6 +150,19 @@ public sealed class MeshRouter(
     /// </summary>
     public async Task<BackplaneDeliveryReceipt> DeliverFromBackplaneAsync(string handle, string deliveryJson)
     {
+        PreviewBackplanePayload? preview;
+        try { preview = JsonSerializer.Deserialize<PreviewBackplanePayload>(deliveryJson, Json); }
+        catch (JsonException) { return BackplaneDeliveryReceipt.NotDelivered; }
+        if (preview?.PreviewRoute is not null && preview.PreviewRequest is not null)
+        {
+            if (Normalize(handle) != preview.PreviewRoute.SenderHandle
+                || preview.PreviewRoute.ExpiresAt <= clock.GetUtcNow())
+                return BackplaneDeliveryReceipt.NotDelivered;
+            using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            var reply = await ReadNotificationPreviewLocalAsync(preview.PreviewRoute, preview.PreviewRequest, budget.Token);
+            return reply is null ? BackplaneDeliveryReceipt.NotDelivered
+                : new BackplaneDeliveryReceipt(BackplaneDeliveryOutcome.Delivered, JsonSerializer.Serialize(reply, Json));
+        }
         try
         {
             var control = JsonSerializer.Deserialize<ControlBackplanePayload>(deliveryJson, Json);
@@ -230,6 +248,43 @@ public sealed class MeshRouter(
         if (outcome == BackplaneDeliveryOutcome.Delivered)
             metrics.BackplaneForwarded();
         return outcome;
+    }
+
+    public async Task<NotificationPreviewResponse?> ReadNotificationPreviewAsync(
+        NotificationWakeRoute route, NotificationPreviewRequest request, CancellationToken ct)
+    {
+        var local = await ReadNotificationPreviewLocalAsync(route, request, ct);
+        if (local is not null) return local;
+        var owner = await backplane.GetInstanceForDeviceAsync(route.SenderHandle, route.SenderDevice, ct);
+        if (owner is null || owner == backplane.InstanceId) return null;
+        var receipt = await backplane.PublishToOwnerAsync(owner, route.SenderHandle,
+            JsonSerializer.Serialize(new PreviewBackplanePayload(route, request), Json), ct);
+        return receipt.PreviewReply is { Length: > 0 and <= NotificationPreviewProtocol.MaxResponseBytes }
+            ? JsonSerializer.Deserialize<NotificationPreviewResponse>(receipt.PreviewReply, Json) : null;
+    }
+
+    private async Task<NotificationPreviewResponse?> ReadNotificationPreviewLocalAsync(
+        NotificationWakeRoute route, NotificationPreviewRequest request, CancellationToken ct)
+    {
+        if (!NotificationPreviewProtocol.IsValidRequest(request, clock.GetUtcNow())
+            || request.Handle != route.RecipientHandle || request.WakeId != route.WakeId
+            || DeviceProtocol.DeviceId(request.PublicKey) != route.RecipientDevice)
+            throw new HubException("Invalid notification preview route.");
+        foreach (var id in registry.ConnectionsForDevice(route.SenderHandle, route.SenderDevice))
+        {
+            var connection = registry.Get(id);
+            if (connection is not { Authenticated: true } || !connection.TryReserveOutbound()) continue;
+            try
+            {
+                return await hub.Clients.Client(id).InvokeAsync<NotificationPreviewResponse?>(
+                    NotificationPreviewProtocol.ClientMethod, request, ct);
+            }
+            finally
+            {
+                connection.ReleaseOutbound();
+            }
+        }
+        return null;
     }
 
     private static string Normalize(string handle) => handle.Trim().TrimStart('@').ToLowerInvariant();

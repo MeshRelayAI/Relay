@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Mesh.Relay.Push;
 
 namespace Mesh.Relay.Backplane;
 
@@ -13,6 +14,7 @@ public sealed class InMemoryBackplane : IBackplane
     private readonly ConcurrentDictionary<string, DateTimeOffset> present = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTimeOffset> presentDevices = new(StringComparer.OrdinalIgnoreCase);
     private readonly TimeProvider clock;
+    private readonly ConcurrentDictionary<string, NotificationWakeRoute> notificationWakes = new(StringComparer.Ordinal);
 
     public InMemoryBackplane(TimeProvider? timeProvider = null)
         => clock = timeProvider ?? TimeProvider.System;
@@ -56,6 +58,31 @@ public sealed class InMemoryBackplane : IBackplane
     public Task<BackplaneDeliveryReceipt> PublishToOwnerAsync(
         string instanceId, string toHandle, string deliveryJson, CancellationToken ct = default)
         => Task.FromResult(BackplaneDeliveryReceipt.NotDelivered); // caller already tried the local socket
+
+    public Task RememberNotificationWakeAsync(NotificationWakeRoute route, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var now = clock.GetUtcNow();
+        foreach (var item in notificationWakes)
+            if (item.Value.ExpiresAt <= now) notificationWakes.TryRemove(item);
+        if (notificationWakes.Count >= 16384 && !notificationWakes.ContainsKey(route.Key))
+            throw new InvalidOperationException("Notification wake routing capacity reached.");
+        notificationWakes.TryAdd(route.Key, route);
+        return Task.CompletedTask;
+    }
+
+    public Task<NotificationWakeRoute?> FindNotificationWakeAsync(
+        string handle, string deviceId, string wakeId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        notificationWakes.TryGetValue(NotificationWakeRoute.KeyFor(handle, deviceId, wakeId), out var route);
+        if (route is not null && route.ExpiresAt <= clock.GetUtcNow())
+        {
+            notificationWakes.TryRemove(new KeyValuePair<string, NotificationWakeRoute>(route.Key, route));
+            route = null;
+        }
+        return Task.FromResult(route);
+    }
 
     private string? GetLiveOwner(
         ConcurrentDictionary<string, DateTimeOffset> leases,

@@ -333,6 +333,13 @@ public sealed class MeshHub(
             return new OnlineWakeResult(true, OnlineWakeCodes.Accepted);
 
 
+        if (request.NotificationWorthy && NotificationPreviewProtocol.IsWakeId(request.WakeId))
+        {
+            await backplane.RememberNotificationWakeAsync(new NotificationWakeRoute(
+                connection.Handle, connection.DeviceId, toHandle, request.ToDevice, request.WakeId,
+                clock.GetUtcNow() + NotificationPreviewProtocol.RouteLifetime), Context.ConnectionAborted);
+        }
+
         var outcome = await push.RequestWakeAsync(
             toHandle,
             request.ToDevice,

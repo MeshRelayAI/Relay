@@ -168,6 +168,7 @@ var brokerHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 var modelHttp = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
 
 app.UseRateLimiter();
+app.MapNotificationPreviews();
 
 // When another instance forwards an in-flight frame to this one, deliver it to the local sockets.
 var router = app.Services.GetRequiredService<MeshRouter>();

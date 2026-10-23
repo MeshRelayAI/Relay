@@ -54,19 +54,10 @@ public sealed class FcmPushSender : IPushSender, IDisposable
         CancellationToken ct = default)
     {
         var access = await GetAccessTokenAsync(ct).ConfigureAwait(false);
-        var message = new
-        {
-            message = new
-            {
-                token,
-                data = BuildWakeData(mode, wakeId),
-                android = new { priority = "high", collapse_key = "mesh-sync" },
-            },
-        };
         using var req = new HttpRequestMessage(
             HttpMethod.Post, $"https://fcm.googleapis.com/v1/projects/{projectId}/messages:send")
         {
-            Content = new StringContent(JsonSerializer.Serialize(message), Encoding.UTF8, "application/json"),
+            Content = new StringContent(SerializeWakePayload(token, mode, wakeId), Encoding.UTF8, "application/json"),
         };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
 
@@ -79,6 +70,23 @@ public sealed class FcmPushSender : IPushSender, IDisposable
             ? PushSendResult.InvalidToken((int)resp.StatusCode, body)
             : PushSendResult.Rejected((int)resp.StatusCode, body);
     }
+
+    internal static string SerializeWakePayload(string token, PushWakeMode mode, string wakeId)
+        => JsonSerializer.Serialize(new
+        {
+            message = new
+            {
+                token,
+                data = BuildWakeData(mode, wakeId),
+                android = new
+                {
+                    priority = "high",
+                    collapse_key = PushWakeDeliveryPolicy.CollapseKey(mode),
+                    ttl = PushWakeDeliveryPolicy.TimeToLiveSeconds
+                        .ToString(System.Globalization.CultureInfo.InvariantCulture) + "s"
+                }
+            }
+        });
 
     internal static IReadOnlyDictionary<string, string> BuildWakeData(PushWakeMode mode, string wakeId)
         => new Dictionary<string, string>

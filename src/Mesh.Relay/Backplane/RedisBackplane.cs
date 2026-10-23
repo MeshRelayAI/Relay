@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Mesh.Relay.Push;
+using Mesh.Shared;
 using StackExchange.Redis;
 
 namespace Mesh.Relay.Backplane;
@@ -116,6 +118,24 @@ public sealed class RedisBackplane : IBackplane
         return value.IsNullOrEmpty ? null : value.ToString();
     }
 
+    public async Task RememberNotificationWakeAsync(NotificationWakeRoute route, CancellationToken ct = default)
+    {
+        var mux = await EnsureConnectedAsync(ct).ConfigureAwait(false);
+        await mux.GetDatabase().StringSetAsync("mesh:notification-wake:" + route.Key,
+            JsonSerializer.Serialize(route), NotificationPreviewProtocol.RouteLifetime, When.NotExists)
+            .WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<NotificationWakeRoute?> FindNotificationWakeAsync(
+        string handle, string deviceId, string wakeId, CancellationToken ct = default)
+    {
+        var mux = await EnsureConnectedAsync(ct).ConfigureAwait(false);
+        var value = await mux.GetDatabase().StringGetAsync("mesh:notification-wake:"
+            + NotificationWakeRoute.KeyFor(handle, deviceId, wakeId)).WaitAsync(ct).ConfigureAwait(false);
+        return value.IsNullOrEmpty ? null
+            : JsonSerializer.Deserialize<NotificationWakeRoute>(value.ToString());
+    }
+
     /// <summary>
     /// Publishes an in-flight opaque frame to the instance that owns the handle so it can deliver it
     /// to the live socket. Waits for a directed acknowledgement so the caller learns the true outcome.
@@ -203,7 +223,8 @@ public sealed class RedisBackplane : IBackplane
                     new FanoutReceipt(
                         routed.CorrelationId,
                         receipt.Outcome == BackplaneDeliveryOutcome.Delivered,
-                        uncertain)))
+                        uncertain,
+                        receipt.PreviewReply)))
                 .ConfigureAwait(false);
         }
         catch
@@ -225,7 +246,8 @@ public sealed class RedisBackplane : IBackplane
                         ? BackplaneDeliveryOutcome.Delivered
                         : ack.Uncertain
                             ? BackplaneDeliveryOutcome.Uncertain
-                            : BackplaneDeliveryOutcome.NotDelivered));
+                            : BackplaneDeliveryOutcome.NotDelivered,
+                    ack.PreviewReply));
         }
         catch (JsonException)
         {
@@ -263,5 +285,6 @@ public sealed class RedisBackplane : IBackplane
     private sealed record FanoutReceipt(
         [property: System.Text.Json.Serialization.JsonPropertyName("correlationId")] string CorrelationId,
         [property: System.Text.Json.Serialization.JsonPropertyName("delivered")] bool Delivered,
-        [property: System.Text.Json.Serialization.JsonPropertyName("uncertain")] bool Uncertain = false);
+        [property: System.Text.Json.Serialization.JsonPropertyName("uncertain")] bool Uncertain = false,
+        [property: System.Text.Json.Serialization.JsonPropertyName("previewReply")] string? PreviewReply = null);
 }
