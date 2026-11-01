@@ -7,7 +7,7 @@ using Mesh.Shared;
 namespace Mesh.Relay.Push;
 
 /// <summary>
-/// Sends alerts to Android devices via FCM (Firebase Cloud Messaging) HTTP v1. Authenticates with an OAuth2
+/// Sends data-only Android sync wakes via FCM (Firebase Cloud Messaging) HTTP v1. Authenticates with an OAuth2
 /// access token minted from a Google service account (RS256 JWT bearer grant), cached and refreshed hourly.
 /// A single bad device token logs a warning and is swallowed, so it never breaks a fan-out to other tokens.
 /// </summary>
@@ -94,7 +94,8 @@ public sealed class FcmPushSender : IPushSender, IDisposable
             ["mesh_type"] = "sync",
             ["mesh_version"] = MeshProtocol.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["wake_id"] = wakeId,
-            ["show_alert"] = mode == PushWakeMode.AlertAndSync ? "1" : "0"
+            // Older clients must not fall back to an undecoded notification either.
+            ["show_alert"] = "0"
         };
     // OAuth2 service-account flow: sign an RS256 JWT bearer assertion and exchange it for an access token.
     private async Task<string> GetAccessTokenAsync(CancellationToken ct)

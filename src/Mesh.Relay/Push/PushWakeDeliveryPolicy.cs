@@ -6,12 +6,7 @@ internal static class PushWakeDeliveryPolicy
 {
     public const int TimeToLiveSeconds = 300;
 
-    public static string ApnsCollapseKey(PushWakeMode mode, string wakeId)
-        => mode == PushWakeMode.AlertAndSync
-            ? NotificationPreviewProtocol.Hash("alert:" + wakeId)
-            : CollapseKey(mode);
-
-    // A later silent sync must not replace an undelivered visible alert.
+    // Keep notification-worthy Android data wakes separate from routine synchronization.
     public static string CollapseKey(PushWakeMode mode)
         => mode switch
         {

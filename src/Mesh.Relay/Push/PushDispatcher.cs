@@ -111,6 +111,7 @@ public sealed class PushDispatcher(
             return PushDispatchOutcome.NoTarget;
 
         var mode = notificationWorthy && token.AlertsEnabled
+            && !string.Equals(token.Platform, DevicePlatforms.IOS, StringComparison.OrdinalIgnoreCase)
             ? PushWakeMode.AlertAndSync
             : PushWakeMode.SyncOnly;
         var maxCount = mode == PushWakeMode.AlertAndSync

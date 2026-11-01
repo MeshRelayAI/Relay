@@ -7,7 +7,7 @@ using Mesh.Shared;
 
 namespace Mesh.Relay.Push;
 
-/// <summary>Sends alert, alert-plus-background, and silent background APNs notifications over HTTP/2.</summary>
+/// <summary>Sends contentless, silent background APNs wakes over HTTP/2.</summary>
 public sealed class ApnsPushSender : IPushSender, IDisposable
 {
     private static readonly HashSet<string> InvalidTokenReasons = new(StringComparer.Ordinal)
@@ -85,10 +85,10 @@ public sealed class ApnsPushSender : IPushSender, IDisposable
         req.Headers.TryAddWithoutValidation("authorization", "bearer " + GetJwt());
         req.Headers.TryAddWithoutValidation("apns-topic", bundleId);
 
-        var visible = mode == PushWakeMode.AlertAndSync;
-        req.Headers.TryAddWithoutValidation("apns-push-type", visible ? "alert" : "background");
-        req.Headers.TryAddWithoutValidation("apns-priority", visible ? "10" : "5");
-        req.Headers.TryAddWithoutValidation("apns-collapse-id", PushWakeDeliveryPolicy.ApnsCollapseKey(mode, wakeId));
+        // An alert payload can be shown unchanged if iOS cannot run or finish the decoding extension.
+        req.Headers.TryAddWithoutValidation("apns-push-type", "background");
+        req.Headers.TryAddWithoutValidation("apns-priority", "5");
+        req.Headers.TryAddWithoutValidation("apns-collapse-id", PushWakeDeliveryPolicy.CollapseKey(PushWakeMode.SyncOnly));
         req.Headers.TryAddWithoutValidation("apns-expiration", DateTimeOffset.UtcNow
             .AddSeconds(PushWakeDeliveryPolicy.TimeToLiveSeconds)
             .ToUnixTimeSeconds()
@@ -109,17 +109,8 @@ public sealed class ApnsPushSender : IPushSender, IDisposable
         PushWakeMode mode = PushWakeMode.SyncOnly,
         string wakeId = "test")
     {
+        // AlertAndSync callers also get a silent wake; only locally decoded activity may notify.
         var aps = new Dictionary<string, object?> { ["content-available"] = 1 };
-        if (mode == PushWakeMode.AlertAndSync)
-        {
-            aps["alert"] = new Dictionary<string, string>
-            {
-                ["title"] = "Mesh",
-                ["body"] = "New activity"
-            };
-            aps["sound"] = "default";
-            aps["mutable-content"] = 1;
-        }
         var payload = new Dictionary<string, object?>
         {
             ["aps"] = aps,
