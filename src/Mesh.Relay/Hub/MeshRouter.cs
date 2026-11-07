@@ -23,7 +23,8 @@ public sealed class MeshRouter(
     IHubContext<MeshHub> hub,
     ConnectionRegistry registry,
     IBackplane backplane,
-    RelayMetrics metrics
+    RelayMetrics metrics,
+    ILogger<MeshRouter> logger
 #if MESH_TEST_RELAY_FAULTS
     ,
     LiveFaultStore liveFaults,
@@ -278,6 +279,12 @@ public sealed class MeshRouter(
             {
                 return await hub.Clients.Client(id).InvokeAsync<NotificationPreviewResponse?>(
                     NotificationPreviewProtocol.ClientMethod, request, ct);
+            }
+            catch (IOException ex)
+            {
+                // SignalR can remove the socket before the registry's disconnect callback runs.
+                ct.ThrowIfCancellationRequested();
+                logger.LogDebug(ex, "Notification preview peer disconnected during retrieval.");
             }
             finally
             {
