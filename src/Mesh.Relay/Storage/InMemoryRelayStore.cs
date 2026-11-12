@@ -119,7 +119,8 @@ public sealed class InMemoryRelayStore : IRelayStore
         bool remoteAgentEnabled,
         bool agentHostEnabled,
         int protocolVersion = MeshProtocol.Version,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        int contextSelectionVersion = 0)
     {
         if (handles.TryGetValue(NormalizeHandle(handle), out var rec))
             lock (rec)
@@ -130,6 +131,7 @@ public sealed class InMemoryRelayStore : IRelayStore
                 rec.DeviceRemoteAgentEnabled[deviceId] = remoteAgentEnabled;
                 rec.DeviceAgentHostEnabled[deviceId] = agentHostEnabled;
                 rec.DeviceProtocolVersions[deviceId] = protocolVersion;
+                rec.DeviceContextSelectionVersions[deviceId] = contextSelectionVersion;
                 if (string.IsNullOrWhiteSpace(rec.AgentPrimaryDeviceId)
                     && DevicePlatforms.IsDesktop(platform)
                     && agentHostEnabled)
@@ -170,6 +172,7 @@ public sealed class InMemoryRelayStore : IRelayStore
             rec.DeviceRemoteAgentEnabled.Remove(targetDeviceId);
             rec.DeviceAgentHostEnabled.Remove(targetDeviceId);
             rec.DeviceProtocolVersions.Remove(targetDeviceId);
+            rec.DeviceContextSelectionVersions.Remove(targetDeviceId);
             rec.DevicePushTokens.Remove(targetDeviceId);
             if (string.Equals(rec.AgentPrimaryDeviceId, targetDeviceId, StringComparison.Ordinal))
                 rec.AgentPrimaryDeviceId = null;
@@ -466,6 +469,7 @@ public sealed class InMemoryRelayStore : IRelayStore
                 DeviceRemoteAgentEnabled = new Dictionary<string, bool>(r.DeviceRemoteAgentEnabled),
                 DeviceAgentHostEnabled = new Dictionary<string, bool>(r.DeviceAgentHostEnabled),
                 DeviceProtocolVersions = new Dictionary<string, int>(r.DeviceProtocolVersions),
+                DeviceContextSelectionVersions = new Dictionary<string, int>(r.DeviceContextSelectionVersions),
                 AgentPrimaryDeviceId = r.AgentPrimaryDeviceId,
                 AgentFailoverDeviceId = r.AgentFailoverDeviceId,
                 AgentRoutingVersion = r.AgentRoutingVersion,

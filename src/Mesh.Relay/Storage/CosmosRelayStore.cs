@@ -378,7 +378,8 @@ public sealed class CosmosRelayStore : IRelayStore
         bool remoteAgentEnabled,
         bool agentHostEnabled,
         int protocolVersion = MeshProtocol.Version,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        int contextSelectionVersion = 0)
         => await MutateHandleAsync(handle, doc =>
         {
             doc.DeviceNames ??= new Dictionary<string, string>();
@@ -386,12 +387,14 @@ public sealed class CosmosRelayStore : IRelayStore
             doc.DeviceRemoteAgentEnabled ??= new Dictionary<string, bool>();
             doc.DeviceAgentHostEnabled ??= new Dictionary<string, bool>();
             doc.DeviceProtocolVersions ??= new Dictionary<string, int>();
+            doc.DeviceContextSelectionVersions ??= new Dictionary<string, int>();
             if (!string.IsNullOrWhiteSpace(name))
                 doc.DeviceNames[deviceId] = name;
             doc.DevicePlatforms[deviceId] = platform;
             doc.DeviceRemoteAgentEnabled[deviceId] = remoteAgentEnabled;
             doc.DeviceAgentHostEnabled[deviceId] = agentHostEnabled;
             doc.DeviceProtocolVersions[deviceId] = protocolVersion;
+            doc.DeviceContextSelectionVersions[deviceId] = contextSelectionVersion;
             if (string.IsNullOrWhiteSpace(doc.AgentPrimaryDeviceId)
                 && DevicePlatforms.IsDesktop(platform)
                 && agentHostEnabled)
@@ -444,6 +447,7 @@ public sealed class CosmosRelayStore : IRelayStore
             doc.DeviceRemoteAgentEnabled?.Remove(targetDeviceId);
             doc.DeviceAgentHostEnabled?.Remove(targetDeviceId);
             doc.DeviceProtocolVersions?.Remove(targetDeviceId);
+            doc.DeviceContextSelectionVersions?.Remove(targetDeviceId);
             doc.DevicePushTokens?.Remove(targetDeviceId);
             if (string.Equals(doc.AgentPrimaryDeviceId, targetDeviceId, StringComparison.Ordinal))
                 doc.AgentPrimaryDeviceId = null;
@@ -1160,6 +1164,8 @@ public sealed class CosmosRelayStore : IRelayStore
         DeviceAgentHostEnabled = doc.DeviceAgentHostEnabled is null
             ? new Dictionary<string, bool>()
             : new Dictionary<string, bool>(doc.DeviceAgentHostEnabled),
+        DeviceContextSelectionVersions = doc.DeviceContextSelectionVersions is null
+            ? new Dictionary<string, int>() : new Dictionary<string, int>(doc.DeviceContextSelectionVersions),
         DeviceProtocolVersions = doc.DeviceProtocolVersions is null
             ? new Dictionary<string, int>()
             : new Dictionary<string, int>(doc.DeviceProtocolVersions),
@@ -1233,6 +1239,9 @@ public sealed class CosmosRelayStore : IRelayStore
 
         [JsonPropertyName("deviceProtocolVersions")]
         public Dictionary<string, int>? DeviceProtocolVersions { get; set; }
+
+        [JsonPropertyName("deviceContextSelectionVersions")]
+        public Dictionary<string, int>? DeviceContextSelectionVersions { get; set; }
 
         [JsonPropertyName("agentPrimaryDeviceId")]
         public string? AgentPrimaryDeviceId { get; set; }

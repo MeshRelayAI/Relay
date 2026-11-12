@@ -346,6 +346,11 @@ app.MapPost("/handles", async (RegisterHandleRequest req) =>
         return Results.BadRequest(new { error = "invalid or missing claim signature" });
     }
 
+    var contextSelectionVersion = req.ContextSelectionVersion > 0
+        && MeshCrypto.Verify(req.DevicePublicKey,
+            ContextSelectionProtocol.CapabilityMessage(handle, req.DevicePublicKey, req.ContextSelectionVersion),
+            req.ContextSelectionSignature ?? "") ? req.ContextSelectionVersion : 0;
+
     var existing = await store.GetHandleAsync(handle);
     if (existing is null)
     {
@@ -386,7 +391,7 @@ app.MapPost("/handles", async (RegisterHandleRequest req) =>
             // Directory honesty: mobile devices never advertise remote hosting.
             DevicePlatforms.CanHostRemoteAgent(req.RemoteAgentEnabled, platform),
             req.AgentHostEnabled,
-            MeshProtocol.Version);
+            MeshProtocol.Version, contextSelectionVersion: contextSelectionVersion);
         metrics.HandleRegistered();
         app.Logger.LogInformation("handle registered: {Handle}", handle);
         return Results.Ok(new RegisterHandleResponse(handle, DeviceProtocol.DeviceId(req.DevicePublicKey), created.RegisteredAt));
@@ -422,7 +427,7 @@ app.MapPost("/handles", async (RegisterHandleRequest req) =>
             hasPlatform
                 ? req.AgentHostEnabled
                 : existing.DeviceAgentHostEnabled.GetValueOrDefault(deviceId),
-            MeshProtocol.Version);
+            MeshProtocol.Version, contextSelectionVersion: contextSelectionVersion);
         return Results.Ok(new RegisterHandleResponse(handle, DeviceProtocol.DeviceId(req.DevicePublicKey), existing.RegisteredAt));
     }
 
@@ -636,6 +641,9 @@ app.MapPost("/model/chat", async (HostedModelRequest req) =>
         var body = await resp.Content.ReadAsStringAsync();
         if (!resp.IsSuccessStatusCode)
         {
+            if (ModelContextError.IsConfirmed(resp.StatusCode, body))
+                return Results.Json(new { error = new { code = "context_length_exceeded", message = "The provider rejected the input context." } },
+                    statusCode: StatusCodes.Status400BadRequest);
             // Upstream failure (bad/expired shared key, upstream rate limit, provider outage) is
             // a server-side problem, not the user's fault: there is nothing to meter on failure,
             // so surface a single "temporarily unavailable" status (503), distinct from the
@@ -705,7 +713,8 @@ app.MapGet("/handles/{handle}/devices", async (string handle) =>
             rec.DevicePlatforms.GetValueOrDefault(deviceId, DevicePlatforms.Unknown),
             rec.DeviceRemoteAgentEnabled.GetValueOrDefault(deviceId),
             rec.DeviceAgentHostEnabled.GetValueOrDefault(deviceId),
-            rec.DeviceProtocolVersions.GetValueOrDefault(deviceId)))
+            rec.DeviceProtocolVersions.GetValueOrDefault(deviceId),
+            rec.DeviceContextSelectionVersions.GetValueOrDefault(deviceId)))
         .ToArray();
 
     return Results.Ok(devices);

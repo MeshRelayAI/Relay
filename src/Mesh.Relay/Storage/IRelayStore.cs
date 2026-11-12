@@ -64,6 +64,7 @@ public sealed class StoredHandle
 
     /// <summary>Mesh protocol version keyed by stable device id.</summary>
     public Dictionary<string, int> DeviceProtocolVersions { get; set; } = new();
+    public Dictionary<string, int> DeviceContextSelectionVersions { get; set; } = new();
 
     /// <summary>The owner's selected device for answering agent-addressed messages.</summary>
     public string? AgentPrimaryDeviceId { get; set; }
@@ -167,7 +168,8 @@ public interface IRelayStore
         bool remoteAgentEnabled,
         bool agentHostEnabled,
         int protocolVersion = MeshProtocol.Version,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        int contextSelectionVersion = 0);
 
     /// <summary>
     /// Revokes one device from a handle's authorized set, advancing the handle's auth generation so
