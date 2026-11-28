@@ -171,6 +171,12 @@ public static class ReplicationFeatures
 {
     /// <summary>The device reports which topic is open so live progress goes only where it is seen.</summary>
     public const string Viewing = "viewing.v1";
+
+    /// <summary>
+    /// The device accepts signed skipped ranges, so devices of other accounts send it only the events
+    /// addressed to its account.
+    /// </summary>
+    public const string ScopedLogs = "scoped-logs.v1";
 }
 
 /// <summary>
@@ -325,11 +331,26 @@ public sealed record ReplicationRequest(
     string LogEpoch,
     IReadOnlyList<ReplicationRange> Ranges);
 
-/// <summary>A bounded batch of events from one origin log.</summary>
+/// <summary>
+/// A bounded batch of events from one origin log. <see cref="Skipped"/> covers positions withheld
+/// from a receiver in another account; a batch may carry only skipped ranges.
+/// </summary>
 public sealed record ReplicationBatch(
     string OriginDeviceId,
     string LogEpoch,
-    IReadOnlyList<ReplicationEvent> Events);
+    IReadOnlyList<ReplicationEvent> Events,
+    ReplicationSkip? Skipped = null);
+
+/// <summary>
+/// Positions of an origin log withheld from one receiving device because they are not addressed to
+/// its account. Signed by the sending device and bound to the receiver, the origin device, the origin
+/// account and the log epoch. Ranges are ascending and disjoint.
+/// </summary>
+public sealed record ReplicationSkip(
+    string ReceiverDeviceId,
+    string OriginAccount,
+    IReadOnlyList<ReplicationRange> Ranges,
+    string Signature);
 
 /// <summary>
 /// A signed persistence receipt proving a receiver durably stored an origin log up to

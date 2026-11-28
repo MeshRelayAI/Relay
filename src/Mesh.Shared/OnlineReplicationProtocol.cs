@@ -206,7 +206,7 @@ public static class OnlineReplicationProtocol
     {
         error = "";
         if (batch is null) { error = "Batch is null."; return false; }
-        if (batch.Events is null || batch.Events.Count == 0) { error = "Batch has no events."; return false; }
+        if (batch.Events is null || (batch.Events.Count == 0 && batch.Skipped is null)) { error = "Batch has no events."; return false; }
         if (batch.Events.Count > OnlineReplicationLimits.MaxBatchOps) { error = "Batch exceeds the op-count limit."; return false; }
         long size = 0;
         foreach (var e in batch.Events)
@@ -219,6 +219,32 @@ public static class OnlineReplicationProtocol
             size += Encoding.UTF8.GetByteCount(e.Ciphertext) + 256;
         }
         if (size > OnlineReplicationLimits.MaxBatchBytes) { error = "Batch exceeds the byte-size limit."; return false; }
+        return batch.Skipped is null || ValidateSkip(batch, batch.Skipped, out error);
+    }
+
+    private static bool ValidateSkip(ReplicationBatch batch, ReplicationSkip skip, out string error)
+    {
+        error = "";
+        if (string.IsNullOrWhiteSpace(batch.OriginDeviceId) || string.IsNullOrWhiteSpace(batch.LogEpoch))
+        { error = "Skipped ranges need the origin and epoch."; return false; }
+        if (string.IsNullOrWhiteSpace(skip.ReceiverDeviceId) || string.IsNullOrWhiteSpace(skip.OriginAccount))
+        { error = "Skipped ranges need the receiver and origin account."; return false; }
+        if (skip.Ranges is null || skip.Ranges.Count == 0) { error = "Skipped ranges are empty."; return false; }
+        if (skip.Ranges.Count > OnlineReplicationLimits.MaxRangeRequests) { error = "Skipped ranges exceed the range-count limit."; return false; }
+        if (!IsSignatureShape(skip.Signature)) { error = "Skipped ranges are not signed."; return false; }
+        ulong previousTo = 0;
+        foreach (var range in skip.Ranges)
+        {
+            if (range is null || range.FromSeq == 0 || range.ToSeq < range.FromSeq || range.ToSeq > long.MaxValue)
+            { error = "A skipped range is malformed."; return false; }
+            if (range.FromSeq <= previousTo) { error = "Skipped ranges must be strictly ascending and disjoint."; return false; }
+            previousTo = range.ToSeq;
+        }
+        foreach (var e in batch.Events)
+        {
+            if (skip.Ranges.Any(range => e.Seq >= range.FromSeq && e.Seq <= range.ToSeq))
+            { error = "An event falls inside a skipped range."; return false; }
+        }
         return true;
     }
 
@@ -465,6 +491,63 @@ public static class OnlineReplicationProtocol
         return CursorApplyResult.AppliedAhead;
     }
 
+    /// <summary>
+    /// Applies an inclusive range of skipped sequences to a cursor, as if each had been applied in
+    /// order. Pure. A range reaching the contiguous head moves it to the range end and collapses
+    /// any ahead bits after it; a range further ahead sets ahead bits inside the reorder window.
+    /// </summary>
+    public static CursorApplyResult ApplyRangeToCursor(
+        ReplicationCursorEntry cursor,
+        string logEpoch,
+        ulong fromSeq,
+        ulong toSeq,
+        out ReplicationCursorEntry updated)
+    {
+        updated = cursor;
+        if (cursor is null || cursor.AheadBits is null
+            || cursor.AheadBits.Length != OnlineReplicationLimits.AheadBitsBytes)
+            return CursorApplyResult.RejectedInvalid;
+        if (fromSeq == 0 || toSeq < fromSeq || toSeq > long.MaxValue) return CursorApplyResult.RejectedInvalid;
+        if (string.IsNullOrEmpty(logEpoch)) return CursorApplyResult.RejectedInvalid;
+        if (!string.IsNullOrEmpty(cursor.LogEpoch) && !string.Equals(cursor.LogEpoch, logEpoch, StringComparison.Ordinal))
+            return CursorApplyResult.RejectedEpochMismatch;
+
+        var contiguous = cursor.Contiguous;
+        if (toSeq <= contiguous) return CursorApplyResult.Duplicate;
+        var bits = (byte[])cursor.AheadBits.Clone();
+
+        if (fromSeq <= contiguous + 1)
+        {
+            var advance = toSeq - contiguous;
+            if (advance >= (ulong)OnlineReplicationLimits.ReorderWindow)
+                Array.Clear(bits);
+            else
+                for (var i = 0UL; i < advance; i++) ShiftDownByOne(bits);
+            contiguous = toSeq;
+            while (GetBit(bits, 0))
+            {
+                contiguous++;
+                ShiftDownByOne(bits);
+            }
+            updated = new ReplicationCursorEntry(logEpoch, contiguous, bits);
+            return CursorApplyResult.AppliedContiguous;
+        }
+
+        var first = fromSeq - contiguous - 1;
+        if (first >= (ulong)OnlineReplicationLimits.ReorderWindow) return CursorApplyResult.RejectedTooFarAhead;
+        var last = Math.Min(toSeq - contiguous - 1, (ulong)OnlineReplicationLimits.ReorderWindow - 1);
+        var changed = false;
+        for (var index = (int)first; index <= (int)last; index++)
+        {
+            if (GetBit(bits, index)) continue;
+            SetBit(bits, index);
+            changed = true;
+        }
+        if (!changed) return CursorApplyResult.Duplicate;
+        updated = new ReplicationCursorEntry(logEpoch, contiguous, bits);
+        return CursorApplyResult.AppliedAhead;
+    }
+
     /// <summary>Deterministic hash binding a cursor's epoch, contiguous head and ahead bits.</summary>
     public static string ComputeCursorHash(ReplicationCursorEntry cursor)
         => HashText(Canonical(
@@ -636,6 +719,52 @@ public static class OnlineReplicationProtocol
             receipt.ThroughSeq, receipt.CursorHash, receipt.BatchHash);
         return MeshCrypto.Verify(receiverPublicKeyB64, canonical, receipt.Signature);
     }
+
+    // -----------------------------------------------------------------------
+    // Skipped ranges.
+    // -----------------------------------------------------------------------
+
+    /// <summary>The canonical statement a sending device signs for the sequences it withholds.</summary>
+    public static string SkipCanonical(string originDeviceId, string logEpoch, ReplicationSkip skip)
+    {
+        ArgumentNullException.ThrowIfNull(skip);
+        var ranges = skip.Ranges ?? Array.Empty<ReplicationRange>();
+        var fields = new List<string?>
+        {
+            "mesh.skip",
+            CanonicalVersion.ToString(CultureInfo.InvariantCulture),
+            skip.ReceiverDeviceId,
+            skip.OriginAccount,
+            originDeviceId,
+            logEpoch,
+            ranges.Count.ToString(CultureInfo.InvariantCulture)
+        };
+        foreach (var range in ranges)
+        {
+            fields.Add(range.FromSeq.ToString(CultureInfo.InvariantCulture));
+            fields.Add(range.ToSeq.ToString(CultureInfo.InvariantCulture));
+        }
+        return Canonical(fields.ToArray());
+    }
+
+    /// <summary>Creates skipped ranges bound to one receiver, signed by the sending device.</summary>
+    public static ReplicationSkip CreateSkip(
+        string receiverDeviceId,
+        string originAccount,
+        string originDeviceId,
+        string logEpoch,
+        IReadOnlyList<ReplicationRange> ranges,
+        string signerPrivateKeyB64)
+    {
+        var unsigned = new ReplicationSkip(receiverDeviceId, originAccount, ranges.ToArray(), "");
+        return unsigned with { Signature = Sign(signerPrivateKeyB64, SkipCanonical(originDeviceId, logEpoch, unsigned)) };
+    }
+
+    /// <summary>Verifies a batch's skipped ranges against the sending device's public key.</summary>
+    public static bool VerifySkip(ReplicationBatch batch, string signerPublicKeyB64)
+        => batch?.Skipped is { } skip
+           && IsSignatureShape(skip.Signature)
+           && MeshCrypto.Verify(signerPublicKeyB64, SkipCanonical(batch.OriginDeviceId, batch.LogEpoch, skip), skip.Signature);
 
     // -----------------------------------------------------------------------
     // Session handshake.
